@@ -6,35 +6,81 @@ on:
   push:
     branches:
       - main
-workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    #runs-on: ubuntu-22.04@20240422.1.0
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-    
-      - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/checkout@v4
         with:
-          python-version: '3.12.3'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
-        #run: pip install selenium==4.19.0 requests==2.31.0 futures==3.0.5 eventlet==0.36.1
-        run: pip install selenium requests futures eventlet
+        run: |
+          pip install --upgrade pip
+          pip install selenium==4.19.0 requests==2.31.0 futures==3.0.5 eventlet==0.36.1
 
       - name: Run itv_all
-        run: python ${{ github.workspace }}/tvtest.py
-      
-      - name: 提交更改
+        id: generate_files
         run: |
-          git config --local user.email "ssili@126.com"
-          git config --local user.name "ssili126"
-          git add .
-          git commit *.txt -m "Add generated file"
-          git commit *.m3u -m "Add generated file"
-          #git pull --rebase
-          git push -f
+          python ${{ github.workspace }}/tvtest.py
+          echo "run_timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+        continue-on-error: false
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git status --short
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "${{ secrets.GIT_EMAIL }}"
+          git config --local user.name "${{ secrets.GIT_NAME }}"
+          
+          # 添加所有生成的文件
+          git add *.txt *.m3u 2>/dev/null || true
+          
+          # 提交（处理可能没有改动的情况）
+          git diff --cached --quiet || git commit -m "Update files at ${{ steps.generate_files.outputs.run_timestamp }}"
+          
+          # 推送（添加重试机制）
+          for i in {1..3}; do
+            if git push; then
+              echo "Push succeeded"
+              break
+            else
+              echo "Push attempt $i failed, retrying..."
+              sleep 5
+            fi
+          done
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-files-${{ steps.generate_files.outputs.run_timestamp }}
+          path: |
+            *.txt
+            *.m3u
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Workflow completed at $(date)"
