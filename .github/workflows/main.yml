@@ -3,38 +3,38 @@ name: itvlist
 on:
   schedule:
     - cron: '0 21 * * *'
-  #push:
-    #branches:
-      #- main
-workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    #runs-on: ubuntu-22.04@20240422.1.0
-
+    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
     
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12.3'
+          python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
-        #run: pip install selenium==4.19.0 requests==2.31.0 futures==3.0.5 eventlet==0.36.1
-        run: pip install selenium requests futures eventlet
+        run: |
+          pip install --upgrade pip
+          pip install selenium requests futures eventlet
 
       - name: Run itv_all
         run: python ${{ github.workspace }}/new.py
+        continue-on-error: false
       
       - name: 提交更改
         run: |
           git config --local user.email "ssili@126.com"
           git config --local user.name "ssili126"
           git add .
-          git commit *.txt -m "Add generated file"
-          #git commit *.m3u -m "Add generated file"
-          #git pull --rebase
-          git push -f
+          git diff --staged --quiet || git commit -m "Update generated files [skip ci]"
+          git push
